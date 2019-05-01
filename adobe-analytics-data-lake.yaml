@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Adobe Analytics Data Lake
+
+Parameters: 
+
+  AdobeAnalyticsDataFeedS3BucketName:
+    Type: String
+
+  AdobeAnalyticsDataLakeS3BucketName:
+    Type: String
+
+  AdobeAnalyticsGlueJobScriptsS3BucketName:
+    Type: String
+
+  GlueDataLakeDatabaseName:
+    Type: String
+    Default: adobe-analytics-data-lake
+
+  AdobeAnalyticsGlueJobName:
+    Type: String
+    Default: adobe-analytics-feed-to-lake
+
+  SNSTopic:
+    Type: String
+    Description: SNSTopic to send Cloudwatch alarm notifications to
+    Default: ''
+
+Conditions:
+
+  SNSTopicProvided: !Not [!Equals [!Ref SNSTopic, '']]
+
+Resources:
+
+  # Glue Job Script/s
+  AdobeAnalyticsGlueJobScriptsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AdobeAnalyticsGlueJobScriptsS3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Data Feed drop from Adobe - data (.tsv.gz), manifests (.txt) and lookup info (.tar.gz)
+  # Encrypt, glacier after a month (files should have been processed by then)
+  AdobeAnalyticsDataFeedS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration: 
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Ref AdobeAnalyticsDataFeedS3BucketName
+      LifecycleConfiguration:
+        Rules:
+        - Id: Glacier
+          Status: Enabled
+          Transitions:
+            - TransitionInDays: 30
+              StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Transformed data into Parquet format for OOM improvements in efficiency
+  AdobeAnalyticsDataLakeS3Bucket:
+    DeletionPolicy: Retain
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration: 
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Ref AdobeAnalyticsDataLakeS3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Create an AWS Glue database to hold table definitions
+  AdobeAnalyticsGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDataLakeDatabaseName
+        Description: Database to hold tables for Adobe Analytics Data Lake
+
+  # IAM role for the crawler
+  HitDataCrawlerIAMRole:
+     Type: AWS::IAM::Role
+     Properties: 
+       ManagedPolicyArns:
+         - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+       AssumeRolePolicyDocument:
+         Version: 2012-10-17
+         Statement:
+           - Effect: Allow
+             Principal:
+               Service:
+                 - glue.amazonaws.com
+             Action:
+               - sts:AssumeRole
+       Policies:
+       - PolicyName: adobe-analytics-data-lake-crawler
+         PolicyDocument:
+           Version: 2012-10-17
+           Statement:
+           -
+             Effect: Allow
+             Action:
+               - s3:ListBucket
+               - s3:GetObject
+             Resource:
+               - !GetAtt AdobeAnalyticsDataLakeS3Bucket.Arn
+               - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/hit-data/*'
+
+  HitDataCrawler:
+     DependsOn:
+       - HitDataCrawlerIAMRole
+     Type: AWS::Glue::Crawler
+     Properties:
+       Name: adobe-analytics-data-lake-hit-data-crawler
+       Role: !GetAtt HitDataCrawlerIAMRole.Arn
+       Description: AWS Glue crawler that makes partitioned Adobe Analytics hit data available to Athena & Redshift Spectrum
+       # The glue job runs at 4:30PM UTC (see that definition for reasons why) so we'll give it an hour (which is twice as long
+       # as it usually takes) and then crawl to see updated partitions.
+       Schedule:
+         ScheduleExpression: "cron(30 17 * * ? *)"
+       DatabaseName: !Ref AdobeAnalyticsGlueDatabase
+       Targets:
+         S3Targets:
+           - Path: !Sub 's3://${AdobeAnalyticsDataLakeS3BucketName}/hit-data'
+       Configuration: '{
+         "Version": 1.0,
+         "CrawlerOutput": {
+           "Partitions": {
+             "AddOrUpdateBehavior": "InheritFromTable"
+           }
+         }
+       }'
+       SchemaChangePolicy:
+         DeleteBehavior: "DELETE_FROM_DATABASE"
+         UpdateBehavior: "UPDATE_IN_DATABASE"
+
+  # IAM role for the conversion job, S3 TSV to S3 Parquet
+  AdobeTSVToParquetGlueJobIAMRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+      - PolicyName: AdobeAnalyticsS3ProcessingAccess
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          -
+            # Glue script itself
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+            Resource:
+              - !GetAtt AdobeAnalyticsGlueJobScriptsS3Bucket.Arn
+              - !Sub '${AdobeAnalyticsGlueJobScriptsS3Bucket.Arn}/hit-data.py'
+          -
+            # Glue job temp dir
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObjectVersion
+              - s3:DeleteObjectVersion
+              - s3:PutObjectAcl
+              - s3:GetObjectAcl
+            Resource:
+              - !Sub '${AdobeAnalyticsGlueJobScriptsS3Bucket.Arn}/hit-data-temp/*'
+          -
+            # Source data feed bucket
+            Effect: Allow
+            Action:
+              # Needs more than read because it moves things to processing
+              - s3:ListBucket
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !GetAtt AdobeAnalyticsDataFeedS3Bucket.Arn
+              - !Sub '${AdobeAnalyticsDataFeedS3Bucket.Arn}/*'
+          -
+            # Target data lake bucket
+            Effect: Allow
+            Action:
+              # Needs more than just put because it makes temporary objects, deletes temporary objects, renames objects, etc.
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+              - s3:GetObjectVersion
+              - s3:DeleteObjectVersion
+              - s3:PutObjectAcl
+              - s3:GetObjectAcl
+            Resource:
+              - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*'
+
+  AdobeTSVToParquetGlueJob:
+    Type: AWS::Glue::Job   
+    DependsOn:
+      AdobeTSVToParquetGlueJobIAMRole
+    Properties:
+      Role: !Ref AdobeTSVToParquetGlueJobIAMRole
+      Description: Converts TSV files from the Adobe Analytics Data Feed in one S3 bucket into the much more efficient Parquet format and stored in another bucket.  Also generates a partitioning column, and does comma-delimited to array conversion.
+      Command:   
+        Name: glueetl
+        ScriptLocation: !Sub 's3://${AdobeAnalyticsGlueJobScriptsS3BucketName}/hit-data.py'
+      DefaultArguments: {
+        "--TempDir": !Sub "s3://${AdobeAnalyticsGlueJobScriptsS3BucketName}/hit-data-temp",
+        "--enable-metrics": "",
+        "--s3source": !Sub "s3://${AdobeAnalyticsDataFeedS3BucketName}",
+        "--s3target": !Sub "s3://${AdobeAnalyticsDataLakeS3BucketName}/hit-data"
+      }
+      AllocatedCapacity: 10
+      ExecutionProperty:   
+        # This must only ever be one or bad stuff might happen
+        MaxConcurrentRuns: 1  
+      Name: !Ref AdobeAnalyticsGlueJobName
+
+  AdobeTSVToParquetGlueJobScheduleTrigger:
+    Type: AWS::Glue::Trigger   
+    DependsOn:
+      - AdobeTSVToParquetGlueJob
+    Properties:
+      Name: !Sub '${AdobeAnalyticsGlueJobName}-daily'
+      Description: Trigger for TSV to Parquet conversion
+      Type: SCHEDULED                                                        	   
+      Actions:
+        - JobName: !Ref AdobeTSVToParquetGlueJob                	  
+      # Trigger daily to try to minimise parquet files.  Timing is tweaked like this: hourly files
+      # arrive from Adobe at 16 to 20 mins past the hour.  So we want to run our daily cron at half past midnight,
+      # which just helpfully minimises the number of parquet files for each partition.  Then we need to
+      # shift that minus 8 hours to UTC which is 4:30PM.
+      Schedule: cron(30 16 * * ? *)
+
+  JobFailureRule:
+    Condition: SNSTopicProvided
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Adobe Analytics Data Lake TSV to Parquet Job Failure
+      EventPattern:
+        source:
+          - aws.glue
+        detail-type:
+          - Glue Job State Change
+        detail:
+          state:
+            - FAILED
+            - TIMEOUT
+          jobName:
+            - !Ref AdobeTSVToParquetGlueJob
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SNSTopic
+          Id: "SNSTopic"
+

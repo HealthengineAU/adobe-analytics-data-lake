@@ -18,18 +18,18 @@ CloudFormation script to set up an Adobe Analytics data lake in AWS.
 
 * Admin -> Data Feeds -> Add
 * Set up as you wish, but you must use this particular configs:
-** Feed Information
-*** Feed Interval: Hourly
-*** Start & End Dates: Continuous Feed
-** Destination
-*** Type: S3
-*** Bucket: <bucket-name>
-*** Path: incoming
-*** Access Key: Get from AWS IAM
-*** Secret Key: Get from AWS IAM
-** Data Column Definitions
-*** Remove Escaped Characters: Yes
-*** Compression Format: Gzip
-*** Packaging Type: Multiple Files
-*** Column Template: All Columns Standard (Oct 2016)
+ * Feed Information
+  * Feed Interval: Hourly
+  * Start & End Dates: Continuous Feed
+ * Destination
+  * Type: S3
+  * Bucket: <bucket-name>
+  * Path: incoming
+  * Access Key: Get from AWS IAM
+ ** Secret Key: Get from AWS IAM
+ * Data Column Definitions
+  * Remove Escaped Characters: Yes
+  * Compression Format: Gzip
+  * Packaging Type: Multiple Files
+  * Column Template: All Columns Standard (Oct 2016)
 

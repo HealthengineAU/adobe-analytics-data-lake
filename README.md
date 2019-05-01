@@ -35,3 +35,16 @@ CloudFormation script to set up an Adobe Analytics data lake in AWS.
         * Packaging Type: Multiple Files
         * Column Template: All Columns Standard (Oct 2016)
 
+## Using Athena
+
+### Basic Query
+
+    SELECT * FROM "adobe-analytics-data-lake"."hit_data" LIMIT 10
+
+### Partition Query
+
+Note: data in newly created partitions will not be visible in Athena until the Crawler 
+is run, which will update the list of partitions.
+
+    SELECT * FROM "adobe-analytics-data-lake"."hit_data" WHERE date = '2019-05-01'
+

@@ -1,14 +1,36 @@
-# adobe-analytics-data-lake
+# Adobe Analytics Data Lake for AWS
+
 CloudFormation script to set up an Adobe Analytics data lake in AWS.
 
 ## Overview
 
-Explanation
-In Adobe Analytics, a Data Feed is set up (using the All Columns Standard 2016) specification.  It is configured to write hourly to an incoming S3 bucket.  Hourly writes avoid huge files that can cause out of memory issues during processing.
-Once a day, an AWS Glue Job runs that takes the compressed tab separated hit data files in the incoming bucket and writes them to the target bucket in Parquet format, partitioning using a calculated date column that is added to the data set.  The reason for this translation is the reduction in the amount of data that needs to be scanned to answer a query by a factor of 1,000.  This also reduces our AWS costs for querying by a factor of 1,000.
-Once a day, after the Glue Job has run, a Glue Crawler runs on the target bucket to update the schema definition of the data stored there.  The column information won't usually change, but new partitions need to be recorded, otherwise they will not appear in queries
-Users can use AWS Athena to run queries directly over the S3 Parquet data, using ANSI SQL.
-To support joining the Adobe Analytics data with other data sets, Redshift Spectrum is set up.  This creates a virtual schema and table in Redshift, that acts just like a regular database table but in fact uses Athena and S3 under the hood to return query results.  Having the data available in Redshift lowers the barrier to entry to use the data and allows it to be enriched with Salesforce and HE data.
+In Adobe Analytics, a Data Feed is set up (using the All Columns Standard 2016)
+specification.  It is configured to write hourly to an incoming S3 bucket.
+Hourly writes avoid huge files that can cause out of memory issues during
+processing.
+
+Once a day, an AWS Glue Job runs that takes the compressed tab separated hit
+data files in the incoming bucket and writes them to the target bucket in
+Parquet format, partitioning using a calculated date column that is added to the
+data set.  The reason for this translation is the reduction in the amount of
+data that needs to be scanned to answer a query by a factor of 1,000.  This also
+reduces our AWS costs for querying by a factor of 1,000.
+
+Once a day, after the Glue Job has run, a Glue Crawler runs on the target bucket
+to update the schema definition of the data stored there.  The column
+information won't usually change, but new partitions need to be recorded,
+otherwise they will not appear in queries
+
+Users can use AWS Athena to run queries directly over the S3 Parquet data, using
+ANSI SQL.
+
+To support joining the Adobe Analytics data with other data sets, Redshift
+Spectrum is set up.  This creates a virtual schema and table in Redshift, that
+acts just like a regular database table but in fact uses Athena and S3 under the
+hood to return query results.  Having the data available in Redshift lowers the
+barrier to entry to use the data and allows it to be enriched with business data
+from other systems.
+
 ## Setup
 
 ### Create script S3 bucket and upload script
@@ -18,7 +40,8 @@ To support joining the Adobe Analytics data with other data sets, Redshift Spect
 
 ### Validate Template
 
-    aws cloudformation validate-template --template-body file://adobe-analytics-data-lake.yaml
+    aws cloudformation validate-template \
+        --template-body file://adobe-analytics-data-lake.yaml
 
 ### Run Template
 

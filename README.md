@@ -14,7 +14,7 @@ data files in the incoming bucket and writes them to the target bucket in
 Parquet format, partitioning using a calculated date column that is added to the
 data set.  The reason for this translation is the reduction in the amount of
 data that needs to be scanned to answer a query by a factor of 1,000.  This also
-reduces our AWS costs for querying by a factor of 1,000.
+reduces AWS costs for querying by a factor of 1,000.
 
 Once a day, after the Glue Job has run, a Glue Crawler runs on the target bucket
 to update the schema definition of the data stored there.  The column

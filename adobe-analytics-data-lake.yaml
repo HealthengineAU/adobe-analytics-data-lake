@@ -20,6 +20,10 @@ Parameters:
     Type: String
     Default: adobe-analytics-feed-to-lake
 
+  RedshiftSpectrumRoleName:
+    Type: String
+    Default: redshift-spectrum-adobe-analytics
+
   SNSTopic:
     Type: String
     Description: SNSTopic to send Cloudwatch alarm notifications to
@@ -276,3 +280,42 @@ Resources:
         - Arn: !Ref SNSTopic
           Id: "SNSTopic"
 
+  RedshiftSpectrumRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RedshiftSpectrumRoleName
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - redshift.amazonaws.com
+        Version: "2008-10-17"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:Get*
+                  - s3:List*
+                Effect: Allow
+                Resource:
+                  - !GetAtt AdobeAnalyticsDataFeedS3Bucket.Arn
+                  - !Sub '${AdobeAnalyticsDataFeedS3Bucket.Arn}/*'
+                  - !GetAtt AdobeAnalyticsDataLakeS3Bucket.Arn
+                  - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*'
+                  - !GetAtt AdobeAnalyticsGlueJobScriptsS3Bucket.Arn
+                  - !Sub '${AdobeAnalyticsGlueJobScriptsS3Bucket.Arn}/*'
+            Version: "2012-10-17"
+          PolicyName: redshift-spectrum-adobe-analytics
+
+Outputs:
+
+  RedshiftSpectrumRoleARN:
+    Description: The ARN of the Redshift Spectrum role
+    Value: !GetAtt RedshiftSpectrumRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RedshiftSpectrumRoleARN'

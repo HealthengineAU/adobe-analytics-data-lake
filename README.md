@@ -87,7 +87,9 @@ Create the virtual schema in Redshift that points to the Glue database (Glue tab
 automatically appear as Redshift tables).  Use the ARN assigned to the Redshift Spectrum
 role returned by the CloudFormation script.
 
-    CREATE EXTERNAL SCHEMA adobe_analytics_data_lake FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
+    CREATE EXTERNAL SCHEMA adobe_analytics_data_lake
+        FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' 
+        IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
  
 Grant access to database users to query the data lake:
 

@@ -45,9 +45,21 @@ from other systems.
 
 ### Run Template
 
+    export PREFIX=mycompany
     aws cloudfromation create-stack \
        --template-body file://adobe-analytics-data-lake.yaml \
        --capabilities CAPABILITY_NAME_IAM
+       --parameters \
+           ParameterKey=AdobeAnalyticsDataFeedS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-feed \
+           ParameterKey=AdobeAnalyticsDataLakeS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-lake \
+           ParameterKey=AdobeAnalyticsGlueJobScriptsS3BucketName,ParameterValue=$PREFIX-glue-scripts \
+           ParameterKey=GlueDataLakeDatabaseName,ParameterValue=adobe-analytics-data-lake \
+           ParameterKey=AdobeAnalyticsGlueJobName,ParameterValue=adobe-analytics-data-feed-to-lake \
+           ParameterKey=RedshiftSpectrumRoleName,ParameterValue=redshift-spectrum-adobe-analytics
+
+### Upload the Glue Job Python script
+
+    aws s3 cp hit-data.py $PREFIX-glue-scripts
 
 ### Set up Adobe Analytics Data Feed
 
@@ -67,6 +79,14 @@ from other systems.
         * Compression Format: Gzip
         * Packaging Type: Multiple Files
         * Column Template: All Columns Standard (Oct 2016)
+
+### Enable Glue Job Trigger
+
+* Go to the AWS Console
+* Go to AWS Glue
+* Go to ETL -> Triggers
+* Select (tick) the job trigger 'adobe-analytics-feed-to-lake-hit-data-daily'
+* Choose Action -> Enable trigger
 
 ## Using Athena
 

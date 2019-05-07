@@ -33,16 +33,6 @@ from other systems.
 
 ## Setup
 
-### Create script S3 bucket and upload script
-
-    aws s3 mb <bucket-name> 
-    aws s3 cp hit-data.py <bucket-name>
-
-### Validate Template
-
-    aws cloudformation validate-template \
-        --template-body file://adobe-analytics-data-lake.yaml
-
 ### Run Template
 
     export PREFIX=mycompany

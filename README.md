@@ -49,7 +49,7 @@ from other systems.
 
 ### Upload the Glue Job Python script
 
-    aws s3 cp hit-data.py $PREFIX-glue-scripts
+    aws s3 cp hit-data.py s3://$PREFIX-glue-scripts/
 
 ### Set up Adobe Analytics Data Feed
 

@@ -93,6 +93,10 @@ is run, which will update the list of partitions.
 
 ## Using Redshift Spectrum
 
+Access the Redshift console in AWS and add the defined Redshift IAM Role created by
+the CloudFormation script.  This grants Redshift the ability to read from the data
+lake S3 bucket.
+
 Create the virtual schema in Redshift that points to the Glue database (Glue tables will
 automatically appear as Redshift tables).  Use the ARN assigned to the Redshift Spectrum
 role returned by the CloudFormation script.

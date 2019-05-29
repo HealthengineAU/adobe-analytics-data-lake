@@ -36,9 +36,10 @@ from other systems.
 ### Run Template
 
     export PREFIX=mycompany
-    aws cloudfromation create-stack \
+    aws cloudformation create-stack \
+       --stack-name adobe-analytics-data-lake \
        --template-body file://adobe-analytics-data-lake.yaml \
-       --capabilities CAPABILITY_NAME_IAM
+       --capabilities CAPABILITY_NAMED_IAM \
        --parameters \
            ParameterKey=AdobeAnalyticsDataFeedS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-feed \
            ParameterKey=AdobeAnalyticsDataLakeS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-lake \

@@ -33,9 +33,12 @@ from other systems.
 
 ## Setup
 
+Make sure that you set your CLI's default region to one of the supported ones listed [here](https://marketing.adobe.com/resources/help/en_US/reference/r_feed-destination.html). Alternatively you can use the [--region option](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-options.html) as shown in the code below.
+
 ### Run Template
 
     export PREFIX=mycompany
+    export REGION=myregion
     aws cloudformation create-stack \
        --stack-name adobe-analytics-data-lake \
        --template-body file://adobe-analytics-data-lake.yaml \
@@ -46,7 +49,8 @@ from other systems.
            ParameterKey=AdobeAnalyticsGlueJobScriptsS3BucketName,ParameterValue=$PREFIX-glue-scripts \
            ParameterKey=GlueDataLakeDatabaseName,ParameterValue=adobe-analytics-data-lake \
            ParameterKey=AdobeAnalyticsGlueJobName,ParameterValue=adobe-analytics-data-feed-to-lake \
-           ParameterKey=RedshiftSpectrumRoleName,ParameterValue=redshift-spectrum-adobe-analytics
+           ParameterKey=RedshiftSpectrumRoleName,ParameterValue=redshift-spectrum-adobe-analytics\
+       --region $REGION
 
 ### Upload the Glue Job Python script
 

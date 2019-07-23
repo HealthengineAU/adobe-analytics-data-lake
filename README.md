@@ -87,14 +87,18 @@ Make sure that you set your CLI's default region to one of the supported ones li
 
 ### Basic Query
 
-    SELECT * FROM "adobe-analytics-data-lake"."hit_data" LIMIT 10
+```sql
+SELECT * FROM "adobe-analytics-data-lake"."hit_data" LIMIT 10
+```
 
 ### Partition Query
 
 Note: data in newly created partitions will not be visible in Athena until the Crawler 
 is run, which will update the list of partitions.
 
-    SELECT * FROM "adobe-analytics-data-lake"."hit_data" WHERE date = '2019-05-01'
+```sql
+SELECT * FROM "adobe-analytics-data-lake"."hit_data" WHERE date = '2019-05-01'
+```
 
 ## Using Redshift Spectrum
 
@@ -106,15 +110,20 @@ Create the virtual schema in Redshift that points to the Glue database (Glue tab
 automatically appear as Redshift tables).  Use the ARN assigned to the Redshift Spectrum
 role returned by the CloudFormation script.
 
-    CREATE EXTERNAL SCHEMA adobe_analytics_data_lake
-        FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' 
-        IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
- 
+```sql
+CREATE EXTERNAL SCHEMA adobe_analytics_data_lake
+    FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' 
+    IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
+```
+
 Grant access to database users to query the data lake:
 
-    GRANT USAGE ON SCHEMA adobe_analytics_data_lake TO <user>;
+```sql
+GRANT USAGE ON SCHEMA adobe_analytics_data_lake TO <user>;
+```
 
 Then query the data:
 
-    SELECT * FROM adobe_analytics_data_lake.hit_data WHERE date = '2019-05-01'
-
+```sql
+SELECT * FROM adobe_analytics_data_lake.hit_data WHERE date = '2019-05-01'
+```

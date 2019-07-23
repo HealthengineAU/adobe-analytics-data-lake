@@ -8,6 +8,7 @@ from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from pyspark.sql.types import *
 from urlparse import urlparse
+from pyspark.sql.functions import col
 
 # Read arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 's3target', 's3source'])
@@ -22,6 +23,8 @@ client = boto3.client('s3')
 # Get all the incoming files
 response = client.list_objects_v2(Bucket = s3sourcebucket, Prefix = 'incoming/')
 files = [ 's3://' + s3sourcebucket + '/' + obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.tsv.gz') ]
+lfiles = [ 's3://' + s3sourcebucket + '/' + obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('lookup_data.tar.gz') ]
+lookup_file = sorted(lfiles, reverse=True)[0] # Use the most recent lookup file
 
 # Initialise the glue job
 sc = SparkContext()
@@ -717,7 +720,7 @@ fields = [
 schema = StructType(fields)
 
 # Read in data using Spark DataFrame and not an AWS Glue DynamicFrame to avoid issues with non-UTF8 characters
-df0 = spark.read.format("com.databricks.spark.csv").option("quote", "\"").option("delimiter", u'\u0009').option("charset", 'utf-8').schema(schema).load(files)
+df0 = spark.read.format("com.databricks.spark.csv").option("quote", "\"").option("delimiter", u'\u0009').option("charset", 'utf-8').schema(schema).load(files[0])
 
 # Remove all rows that are entirely nulls
 df1 = df0.dropna(how = 'all')
@@ -725,8 +728,61 @@ df1 = df0.dropna(how = 'all')
 # Generate a partitioning column
 df2 = df1.withColumn('date', df1.date_time.cast('date'))
 
+# Build join lookup table
+lookup_tables = [
+    ('browser', 'browser'),
+    #'browser_type', # does not exist
+    #'color_depth', # does not exist
+    ('connection_type', 'connection_type'),
+    ('country', 'country'),
+    #'event', # does not exist
+    ('javascript_version', 'javascript'),
+    ('language', 'language'),
+    ('operating_systems', 'os'),
+    ('plugins', 'plugins'),
+    ('referrer_type', 'ref_type'),
+    ('resolution', 'resolution'),
+    ('search_engine', 'search_engine')
+]
+
+import tarfile
+from io import BytesIO
+
+def extractFiles(bytes):
+    tar = tarfile.open(fileobj=BytesIO(bytes), mode="r:gz")
+    return [(x.name, tar.extractfile(x).read()) for x in tar if x.isfile()]
+
+lookup_tables_rdd = (spark.sparkContext.binaryFiles(lookup_file)
+    .flatMapValues(extractFiles)
+    .map(lambda row: (row[1][0], row[1][1].decode('utf-8', 'ignore'))))
+
+def row_parser(row):
+    arr = row.split('\t')
+    if len(arr) == 2:
+        return (int(arr[0]), arr[1])
+    else:
+        return (None, None)
+
+lookup_schema = StructType([
+    StructField("id", LongType(), True),
+    StructField("name", StringType(), True),
+])
+
+df3 = df2
+for lookup in lookup_tables:
+    lookup_rdd = (lookup_tables_rdd
+                  .filter(lambda x: x[0] == lookup[0] + '.tsv')
+                  .flatMap(lambda x: (x[1].split('\n')))
+                  .map(row_parser)
+                  .filter(lambda x: x[0] != None))
+    df_lookup = spark.createDataFrame(lookup_rdd, schema=lookup_schema)
+    df3 = (df3
+           .join(df_lookup, col(lookup[1]) == df_lookup.id, 'left')
+           .drop(lookup[1], 'id')
+           .withColumnRenamed('name', lookup[1]))
+
 # Write out in parquet format, partitioned by date, to the S3 location specified in the arguments
-ds2 = df2.write.format("parquet").partitionBy("date").mode("append").save(args['s3target'])
+ds2 = df3.write.format("parquet").partitionBy("date").mode("append").save(args['s3target'])
 
 # retrieve the tracked files from the initial DataFrame
 # you need to access the java RDD instances to get to the partitions information
@@ -743,4 +799,3 @@ for uri in files:
    client.delete_object(Bucket = parsed.netloc, Key = parsed.path.lstrip('/'))
 
 job.commit()
-

@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Testing Lambda Functions
+
+Parameters:
+    AdobeAnalyticsDataLakeS3BucketName:
+      Type: String
+
+Resources:
+
+  AdobeAnalyticsDataLakeS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration: 
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Ref AdobeAnalyticsDataLakeS3BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: "/"
+      Policies:
+      - PolicyName: DeleteTemporaryFiles
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:GetObject
+            Resource:
+              - !GetAtt AdobeAnalyticsDataLakeS3Bucket.Arn
+              - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*'
+          -
+            Effect: Allow
+            Action:
+              - s3:DeleteObject
+            Resource:
+              - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*_$folder$'
+  LambdaSchedule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${LambdaFunction.Arn}
+          Id: LambdaSchedule
+          InputTransformer:
+            InputPathsMap:
+              Bucket: !Ref AdobeAnalyticsDataLakeS3BucketName
+            InputTemplate: "Test"
+
+  LambdaSchedulePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Sub ${LambdaFunction.Arn}
+      Principal: 'events.amazonaws.com'
+      SourceArn: !Sub ${LambdaSchedule.Arn}
+
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Description: >
+        Lambda function that returns 'Hello World!'
+      Code:
+        ZipFile: !Sub
+          import boto3
+          from datetime import datetime, timezone, timedelta
+
+          s3 = boto3.client('s3')
+          def lambda_handler(event, context):
+              kwargs = {'Bucket': event['Bucket']}
+              is_truncated = True
+              while is_truncated:
+                  response = s3.list_objects_v2(**kwargs)
+                  for obj in response['Contents']:
+                      if obj['Key'].endswith('_$folder$') and obj['LastModified'] < datetime.now(timezone.utc) - timedelta(hours=1):
+                          s3.delete_object(Bucket=bucket, obj['Key'])
+                  if response['IsTruncated']:
+                      kwargs['ContinuationToken'] = response['NextContinuationToken']
+                  else:
+                      is_truncated = False
+              return
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Timeout: 900
+      Role: !Sub ${LambdaExecutionRole.Arn}
+      Runtime: python3.7

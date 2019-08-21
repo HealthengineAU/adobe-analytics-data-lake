@@ -9,6 +9,8 @@ from pyspark.context import SparkContext
 from pyspark.sql.types import *
 from urlparse import urlparse
 from pyspark.sql.functions import col
+import tarfile
+from io import BytesIO
 
 # Read arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 's3target', 's3source'])
@@ -744,9 +746,6 @@ lookup_tables = [
     ('resolution', 'resolution'),
     ('search_engine', 'search_engine')
 ]
-
-import tarfile
-from io import BytesIO
 
 def extractFiles(bytes):
     tar = tarfile.open(fileobj=BytesIO(bytes), mode="r:gz")

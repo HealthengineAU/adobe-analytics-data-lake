@@ -734,15 +734,16 @@ df2 = df1.withColumn('date', df1.date_time.cast('date'))
 lookup_tables = [
     ('browser', 'browser'),
     #'browser_type', # does not exist
-    #'color_depth', # does not exist
+    ('color_depth', 'color'),
     ('connection_type', 'connection_type'),
     ('country', 'country'),
-    #'event', # does not exist
+    #'event', # Event list contains a list of events. e.g., 100,101,102,103,104,105,106,107,108,109,119,120,121,122,141,150
     ('javascript_version', 'javascript'),
     ('language', 'language'),
     ('operating_systems', 'os'),
     ('plugins', 'plugins'),
     ('referrer_type', 'ref_type'),
+    ('referrer_type', 'ref_domain'),
     ('resolution', 'resolution'),
     ('search_engine', 'search_engine')
 ]

@@ -63,10 +63,6 @@ Resources:
       Targets:
         - Arn: !Sub ${LambdaFunction.Arn}
           Id: LambdaSchedule
-          InputTransformer:
-            InputPathsMap:
-              Bucket: !Ref AdobeAnalyticsDataLakeS3BucketName
-            InputTemplate: "Test"
 
   LambdaSchedulePermission:
     Type: "AWS::Lambda::Permission"
@@ -79,28 +75,36 @@ Resources:
   LambdaFunction:
     Type: "AWS::Lambda::Function"
     Properties:
-      Description: >
-        Lambda function that returns 'Hello World!'
       Code:
-        ZipFile: !Sub
+        ZipFile: |
           import boto3
           from datetime import datetime, timezone, timedelta
+          import os
 
           s3 = boto3.client('s3')
           def lambda_handler(event, context):
-              kwargs = {'Bucket': event['Bucket']}
+              kwargs = {'Bucket': os.environ['LAKE_BUCKET']}
               is_truncated = True
+              deletables = set()
               while is_truncated:
                   response = s3.list_objects_v2(**kwargs)
                   for obj in response['Contents']:
-                      if obj['Key'].endswith('_$folder$') and obj['LastModified'] < datetime.now(timezone.utc) - timedelta(hours=1):
-                          s3.delete_object(Bucket=bucket, obj['Key'])
+                      if obj['Key'].endswith('_$folder$') and obj['LastModified'] < datetime.now(timezone.utc) - timedelta(hours=0):
+                          deletables.add(obj['Key'])
                   if response['IsTruncated']:
                       kwargs['ContinuationToken'] = response['NextContinuationToken']
                   else:
                       is_truncated = False
+
+              delete = {
+                  'Objects': [{'Key': obj} for obj in deletables]
+              }
+              s3.delete_objects(Bucket=os.environ['LAKE_BUCKET'], Delete=delete)
               return
       Handler: index.lambda_handler
+      Environment:
+        Variables:
+          LAKE_BUCKET: !Ref AdobeAnalyticsDataLakeS3BucketName
       MemorySize: 128
       Timeout: 900
       Role: !Sub ${LambdaExecutionRole.Arn}

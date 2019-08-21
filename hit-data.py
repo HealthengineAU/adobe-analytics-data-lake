@@ -778,7 +778,8 @@ for lookup in lookup_tables:
     df_lookup = spark.createDataFrame(lookup_rdd, schema=lookup_schema)
     df3 = (df3
            .join(df_lookup, col(lookup[1]) == df_lookup.id, 'left')
-           .drop(lookup[1], 'id')
+           .drop('id')
+           .withColumnRenamed(lookup[1], lookup[1] + '_id')
            .withColumnRenamed('name', lookup[1]))
 
 # Write out in parquet format, partitioned by date, to the S3 location specified in the arguments

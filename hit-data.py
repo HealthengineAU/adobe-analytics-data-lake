@@ -2,6 +2,7 @@
 # flake8: noqa
 import sys
 import boto3
+from collections import defaultdict, OrderedDict
 from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions

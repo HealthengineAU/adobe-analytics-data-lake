@@ -904,14 +904,7 @@ for date in sorted(file_batch.keys())[:-1]:
             .withColumnRenamed(lookup[1], lookup[1] + '_id')
             .withColumnRenamed('name', lookup[1]))
     ds2 = df2.repartition(4).write.format("parquet").partitionBy("date").mode("append").save(args['s3target'])
-    with closing(Pool(processes=5)) as pool:
-        copy_result = pool.map(copy_to_processed, file_batch[date])
-    
-    copy_failures = len(filter(lambda x: not 200 <= x['ResponseMetadata']['HTTPStatusCode'] <= 299 , copy_result))
-    if copy_failures == 0:
-        delete_files(file_batch[date])
-    else:
-        raise Exception('Could not copy the files to the processed folder.')
+    move_files_to_processed(file_batch[date])
 
 logger.info('Removing the non-data files such as manifest and lookup tables.')
 not_data_files = filter(lambda x: not x.endswith('.tsv.gz'), all_files)

@@ -227,17 +227,22 @@ Resources:
       AdobeTSVToParquetGlueJobIAMRole
     Properties:
       Role: !Ref AdobeTSVToParquetGlueJobIAMRole
-      Description: Converts TSV files from the Adobe Analytics Data Feed in one S3 bucket into the much more efficient Parquet format and stored in another bucket.  Also generates a partitioning column, and does comma-delimited to array conversion.
+      Description: Converts TSV files from the Adobe Analytics Data Feed in one S3 bucket into the much more efficient Parquet format and stores in another bucket. Additionally, it joins the hit data with the lookup table provided in the dat feed. Also generates a partitioning column, and does comma-delimited to array conversion.
+      # Change the values for WorkerType, NumberOfWorkers and Timeout
+      # as needed.
+      WorkerType: G.2X
+      NumberOfWorkers: 10
+      Timeout: 90
       Command:   
         Name: glueetl
         ScriptLocation: !Sub 's3://${AdobeAnalyticsGlueJobScriptsS3BucketName}/hit-data.py'
       DefaultArguments: {
         "--TempDir": !Sub "s3://${AdobeAnalyticsGlueJobScriptsS3BucketName}/hit-data-temp",
         "--enable-metrics": "",
+        "--enable-continuous-cloudwatch-log": "true",
         "--s3source": !Sub "s3://${AdobeAnalyticsDataFeedS3BucketName}",
         "--s3target": !Sub "s3://${AdobeAnalyticsDataLakeS3BucketName}/hit-data"
       }
-      AllocatedCapacity: 10
       ExecutionProperty:   
         # This must only ever be one or bad stuff might happen
         MaxConcurrentRuns: 1  

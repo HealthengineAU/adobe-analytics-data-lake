@@ -312,6 +312,98 @@ Resources:
             Version: "2012-10-17"
           PolicyName: redshift-spectrum-adobe-analytics
 
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Path: "/"
+      Policies:
+      - PolicyName: DeleteTemporaryFiles
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          -
+            Effect: Allow
+            Action:
+              - s3:List*
+            Resource:
+              - !GetAtt AdobeAnalyticsDataLakeS3Bucket.Arn
+              - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*'
+          -
+            Effect: Allow
+            Action:
+              - s3:DeleteObject
+            Resource:
+              - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*_$folder$'
+
+  LambdaSchedule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      ScheduleExpression: rate(1 day)
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${LambdaFunction.Arn}
+          Id: LambdaSchedule
+
+  LambdaSchedulePermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Sub ${LambdaFunction.Arn}
+      Principal: 'events.amazonaws.com'
+      SourceArn: !Sub ${LambdaSchedule.Arn}
+
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          from datetime import datetime, timezone, timedelta
+          import os
+
+          s3 = boto3.client('s3')
+          def lambda_handler(event, context):
+              kwargs = {'Bucket': os.environ['LAKE_BUCKET']}
+              is_truncated = True
+              deletables = set()
+              while is_truncated:
+                  response = s3.list_objects_v2(**kwargs)
+                  if response['IsTruncated']:
+                      kwargs['ContinuationToken'] = response['NextContinuationToken']
+                  else:
+                      is_truncated = False
+                  if 'Contents' in response.keys():
+                      for obj in response['Contents']:
+                          if obj['Key'].endswith('_$folder$') \
+                              and obj['LastModified'] < datetime.now(timezone.utc) - timedelta(hours=1):
+                              deletables.add(obj['Key'])
+              if len(deletables) > 0:
+                  delete = {
+                      'Objects': [{'Key': obj} for obj in deletables]
+                  }
+                  s3.delete_objects(Bucket=os.environ['LAKE_BUCKET'], Delete=delete)
+              return
+      Handler: index.lambda_handler
+      Environment:
+        Variables:
+          LAKE_BUCKET: !Ref AdobeAnalyticsDataLakeS3BucketName
+      MemorySize: 128
+      Timeout: 900
+      Role: !Sub ${LambdaExecutionRole.Arn}
+      Runtime: python3.7
+
+
 Outputs:
 
   RedshiftSpectrumRoleARN:

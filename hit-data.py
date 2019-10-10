@@ -905,7 +905,8 @@ for date in sorted(file_batch.keys())[:-1]:
 
 logger.info('Removing the non-data files such as manifest and lookup tables.')
 not_data_files = filter(lambda x: not x.endswith('.tsv.gz'), all_files)
-move_files_to_processed(not_data_files)
+removables = sorted(not_data_files)[:-1]
+move_files_to_processed(removables)
 
 logger.info('Finished processing the data. Commiting the job.')
 

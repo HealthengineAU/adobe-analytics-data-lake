@@ -408,9 +408,7 @@ Resources:
       Role: !Sub ${LambdaExecutionRole.Arn}
       Runtime: python3.7
 
-
 Outputs:
-
   RedshiftSpectrumRoleARN:
     Description: The ARN of the Redshift Spectrum role
     Value: !GetAtt RedshiftSpectrumRole.Arn

@@ -16,9 +16,6 @@ from datetime import datetime
 from multiprocessing import Pool
 from contextlib import closing
 
-# Temporary for debugging only
-args = {'s3target': 's3://ingram-gbi4-adobe-analytics-data-lake/hit-data/', 's3source': 's3://ingram-gbi-adobe-analytics-data-feed', 'JOB_NAME': 'adobe-analytics-data-feed-to-lake'}
-
 # Read arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 's3target', 's3source'])
 

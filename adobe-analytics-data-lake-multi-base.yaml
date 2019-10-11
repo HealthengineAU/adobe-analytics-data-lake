@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Adobe Analytics Data Lake
+Description: Adobe Analytics Data Lake Base
 
 Parameters: 
 
@@ -40,31 +40,6 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Ref AdobeAnalyticsGlueJobScriptsS3BucketName
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-
-  # Data Feed drop from Adobe - data (.tsv.gz), manifests (.txt) and lookup info (.tar.gz)
-  # Encrypt, glacier after a month (files should have been processed by then)
-  AdobeAnalyticsDataFeedS3Bucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    Properties:
-      BucketEncryption: 
-        ServerSideEncryptionConfiguration: 
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      BucketName: !Ref AdobeAnalyticsDataFeedS3BucketName
-      LifecycleConfiguration:
-        Rules:
-        - Id: Glacier
-          Prefix: processed/
-          Status: Enabled
-          Transitions:
-            - TransitionInDays: 30
-              StorageClass: GLACIER
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -205,8 +180,8 @@ Resources:
               - s3:PutObject
               - s3:DeleteObject
             Resource:
-              - !GetAtt AdobeAnalyticsDataFeedS3Bucket.Arn
-              - !Sub '${AdobeAnalyticsDataFeedS3Bucket.Arn}/*'
+              - !Sub "arn:aws:s3:::${AdobeAnalyticsDataFeedS3BucketName}"
+              - !Sub "arn:aws:s3:::${AdobeAnalyticsDataFeedS3BucketName}/*"
           -
             # Target data lake bucket
             Effect: Allow
@@ -309,8 +284,8 @@ Resources:
                   - s3:List*
                 Effect: Allow
                 Resource:
-                  - !GetAtt AdobeAnalyticsDataFeedS3Bucket.Arn
-                  - !Sub '${AdobeAnalyticsDataFeedS3Bucket.Arn}/*'
+                  - !Sub "arn:aws:s3:::${AdobeAnalyticsDataFeedS3BucketName}"
+                  - !Sub "arn:aws:s3:::${AdobeAnalyticsDataFeedS3BucketName}/*"
                   - !GetAtt AdobeAnalyticsDataLakeS3Bucket.Arn
                   - !Sub '${AdobeAnalyticsDataLakeS3Bucket.Arn}/*'
                   - !GetAtt AdobeAnalyticsGlueJobScriptsS3Bucket.Arn

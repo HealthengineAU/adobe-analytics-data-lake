@@ -33,9 +33,9 @@ from other systems.
 
 ## Setup
 
-Make sure that you set your CLI's default region to one of the supported ones listed [here](https://marketing.adobe.com/resources/help/en_US/reference/r_feed-destination.html). Alternatively you can use the [--region option](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-options.html) as shown in the code below.
+Make sure that you set your CLI's default region (or feed's CloudFormation region in multi-region deployment) to one of the supported ones listed [here](https://marketing.adobe.com/resources/help/en_US/reference/r_feed-destination.html). Alternatively you can use the [--region option](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-options.html) as shown in the code below.
 
-### Run Template
+### Run Single-Region Template
 
     export PREFIX=mycompany
     export REGION=myregion
@@ -51,6 +51,34 @@ Make sure that you set your CLI's default region to one of the supported ones li
            ParameterKey=AdobeAnalyticsGlueJobName,ParameterValue=adobe-analytics-data-feed-to-lake \
            ParameterKey=RedshiftSpectrumRoleName,ParameterValue=redshift-spectrum-adobe-analytics\
        --region $REGION
+
+### Run Multi-Region Template
+
+```bash
+    export PREFIX=mycompany
+    export REGION_FEED=us-east-1 # Pick an Adobe supported region for the feed
+    export REGION_BASE=us-east-2 # Any AWS region that supports the core services (Glue, RedShift Spectrum, etc.)
+    aws cloudformation create-stack \
+       --stack-name adobe-analytics-data-lake-base \
+       --template-body file://adobe-analytics-data-lake-multi-base.yaml \
+       --capabilities CAPABILITY_NAMED_IAM \
+       --parameters \
+           ParameterKey=AdobeAnalyticsDataFeedS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-feed \
+           ParameterKey=AdobeAnalyticsDataLakeS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-lake \
+           ParameterKey=AdobeAnalyticsGlueJobScriptsS3BucketName,ParameterValue=$PREFIX-glue-scripts \
+           ParameterKey=GlueDataLakeDatabaseName,ParameterValue=adobe-analytics-data-lake \
+           ParameterKey=AdobeAnalyticsGlueJobName,ParameterValue=adobe-analytics-data-feed-to-lake \
+           ParameterKey=RedshiftSpectrumRoleName,ParameterValue=redshift-spectrum-adobe-analytics\
+       --region $REGION_BASE
+
+    aws cloudformation create-stack \
+       --stack-name adobe-analytics-data-lake-base \
+       --template-body file://adobe-analytics-data-lake-multi-feed.yaml \
+       --capabilities CAPABILITY_NAMED_IAM \
+       --parameters \
+           ParameterKey=AdobeAnalyticsDataFeedS3BucketName,ParameterValue=$PREFIX-adobe-analytics-data-feed \
+       --region $REGION_FEED
+```
 
 ### Upload the Glue Job Python script
 
@@ -87,14 +115,18 @@ Make sure that you set your CLI's default region to one of the supported ones li
 
 ### Basic Query
 
-    SELECT * FROM "adobe-analytics-data-lake"."hit_data" LIMIT 10
+```sql
+SELECT * FROM "adobe-analytics-data-lake"."hit_data" LIMIT 10
+```
 
 ### Partition Query
 
 Note: data in newly created partitions will not be visible in Athena until the Crawler 
 is run, which will update the list of partitions.
 
-    SELECT * FROM "adobe-analytics-data-lake"."hit_data" WHERE date = '2019-05-01'
+```sql
+SELECT * FROM "adobe-analytics-data-lake"."hit_data" WHERE date = '2019-05-01'
+```
 
 ## Using Redshift Spectrum
 
@@ -106,15 +138,20 @@ Create the virtual schema in Redshift that points to the Glue database (Glue tab
 automatically appear as Redshift tables).  Use the ARN assigned to the Redshift Spectrum
 role returned by the CloudFormation script.
 
-    CREATE EXTERNAL SCHEMA adobe_analytics_data_lake
-        FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' 
-        IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
- 
+```sql
+CREATE EXTERNAL SCHEMA adobe_analytics_data_lake
+    FROM DATA CATALOG DATABASE 'adobe-analytics-data-lake' 
+    IAM_ROLE 'arn:aws:iam::<aws-account-id>:role/redshift-spectrum';
+```
+
 Grant access to database users to query the data lake:
 
-    GRANT USAGE ON SCHEMA adobe_analytics_data_lake TO <user>;
+```sql
+GRANT USAGE ON SCHEMA adobe_analytics_data_lake TO <user>;
+```
 
 Then query the data:
 
-    SELECT * FROM adobe_analytics_data_lake.hit_data WHERE date = '2019-05-01'
-
+```sql
+SELECT * FROM adobe_analytics_data_lake.hit_data WHERE date = '2019-05-01'
+```

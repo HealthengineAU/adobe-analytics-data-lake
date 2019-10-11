@@ -2,30 +2,27 @@
 # flake8: noqa
 import sys
 import boto3
+from collections import defaultdict, OrderedDict
 from awsglue.context import GlueContext
 from awsglue.job import Job
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from pyspark.sql.types import *
 from urlparse import urlparse
+from pyspark.sql.functions import col, broadcast
+import tarfile
+from io import BytesIO
+from datetime import datetime
+from multiprocessing import Pool
+from contextlib import closing
 
 # Read arguments
 args = getResolvedOptions(sys.argv, ['JOB_NAME', 's3target', 's3source'])
 
-# Extract bucket from source uri
-parsed = urlparse(args['s3source'])
-s3sourcebucket = parsed.netloc
-
-# Initialise boto3
-client = boto3.client('s3')
-
-# Get all the incoming files
-response = client.list_objects_v2(Bucket = s3sourcebucket, Prefix = 'incoming/')
-files = [ 's3://' + s3sourcebucket + '/' + obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.tsv.gz') ]
-
 # Initialise the glue job
 sc = SparkContext()
 glueContext = GlueContext(sc)
+logger = glueContext.get_logger()
 spark = glueContext.spark_session
 job = Job(glueContext)
 job.init(args['JOB_NAME'], args)
@@ -716,31 +713,201 @@ fields = [
 
 schema = StructType(fields)
 
-# Read in data using Spark DataFrame and not an AWS Glue DynamicFrame to avoid issues with non-UTF8 characters
-df0 = spark.read.format("com.databricks.spark.csv").option("quote", "\"").option("delimiter", u'\u0009').option("charset", 'utf-8').schema(schema).load(files)
+# Build join lookup table
+lookup_tables = [
+    ('browser', 'browser'),
+    ('color_depth', 'color'),
+    ('connection_type', 'connection_type'),
+    ('country', 'country'),
+    #'event', # Event list contains a list of events. e.g., 100,101,102,103,104,105,106,107,108,109,119,120,121,122,141,150
+    ('javascript_version', 'javascript'),
+    ('language', 'language'),
+    ('operating_systems', 'os'),
+    ('plugins', 'plugins'),
+    ('referrer_type', 'ref_type'),
+    ('referrer_type', 'ref_domain'),
+    ('resolution', 'resolution'),
+    ('search_engine', 'search_engine')
+]
 
-# Remove all rows that are entirely nulls
-df1 = df0.dropna(how = 'all')
+# Initialise boto3
+s3_client = boto3.client('s3')
 
-# Generate a partitioning column
-df2 = df1.withColumn('date', df1.date_time.cast('date'))
 
-# Write out in parquet format, partitioned by date, to the S3 location specified in the arguments
-ds2 = df2.write.format("parquet").partitionBy("date").mode("append").save(args['s3target'])
+logger.info('Reading the job arguments to find the source bucket.')
 
-# retrieve the tracked files from the initial DataFrame
-# you need to access the java RDD instances to get to the partitions information
-# The file URIs will be in the following format: u's3://mybucket/mypath/myfile.tsv.gz'
-files = []
-for p in df0.rdd._jrdd.partitions():
-    files.extend([f.filePath() for f in p.files().array()])
+# Extract bucket from source uri
+parsed = urlparse(args['s3source'])
+source_bucket = parsed.netloc
 
-# Move processed files and ignored to the processed folder
-files.extend([ 's3://' + s3sourcebucket + '/' + obj['Key'] for obj in response['Contents'] if (obj['Key'].endswith('lookup_data.tar.gz') or obj['Key'].endswith('.txt')) ])
-for uri in files:
-   parsed = urlparse(uri)
-   client.copy_object(CopySource = {'Bucket': parsed.netloc, 'Key': parsed.path.lstrip('/')}, Bucket = parsed.netloc, Key = parsed.path.replace('/incoming/', '/processed/', 1).lstrip('/'))
-   client.delete_object(Bucket = parsed.netloc, Key = parsed.path.lstrip('/'))
+
+def extract_files(bytes):
+    tar = tarfile.open(fileobj=BytesIO(bytes), mode="r:gz")
+    return [(x.name, tar.extractfile(x).read()) for x in tar if x.isfile()]
+
+def row_parser(row):
+    arr = row.split('\t')
+    if len(arr) == 2:
+        return (int(arr[0]), arr[1])
+    else:
+        return (None, None)
+
+def copy_to_processed(key, bucket=source_bucket):
+    kwargs = {
+        'CopySource': {
+            'Bucket': bucket,
+            'Key': key},
+        'Bucket': bucket,
+        'Key': key.replace("incoming/", "processed/", 1),
+        'ContentType': 'application/x-gzip',
+        'Metadata': {
+            'ProcessDate': str(datetime.now())
+        },
+        'MetadataDirective': 'REPLACE',
+        'StorageClass': 'STANDARD_IA'
+    }
+    response = s3_client.copy_object(**kwargs)
+    if 'ServerSideEncryption' not in response:
+        logger.warn('Bucket policy does not encrypt the file by default. File key: ', key)
+    return response
+
+def delete_files(keys, bucket=source_bucket):
+    '''Deletes the list of input files
+    '''
+    delete_result = s3_client.delete_objects(
+        Bucket=source_bucket,
+        Delete={
+            'Objects': [{'Key': key} for key in keys[:1000]]
+        }
+    )
+    if len(keys) > 1000:
+        delete2_result = delete_files(keys=keys[1000:], bucket=source_bucket)
+        delete_result['Deleted'] += delete2_result['Deleted']
+        delete_result['Errors'] = delete_result.get('Errors', list()) + \
+            delete2_result.get('Errors', list())
+    return delete_result
+
+def move_files_to_processed(keys):
+    '''Copies the files to the processed folder
+    and deletes them from the original location
+    '''
+    with closing(Pool(processes=5)) as pool:
+        copy_result = pool.map(copy_to_processed, keys)
+    copy_failures = len(filter(lambda x: not 200 <= x['ResponseMetadata']['HTTPStatusCode'] <= 299 , copy_result))
+    if copy_failures == 0:
+        delete_files(keys)
+    else:
+        raise Exception('Could not copy the files to the processed folder. ' + \
+            'Aborted the delete operation.')
+
+
+# Define the schema of lookup tables
+lookup_schema = StructType([
+    StructField("id", LongType(), True),
+    StructField("name", StringType(), True),
+])
+
+# Get all the incoming files
+def get_all_files(s3_client, bucket, prefix=''):
+    '''Returns a set contianing all the files in the specified
+    bucket and prefix.
+    '''
+    kwargs = {'Bucket': bucket, 'Prefix': prefix}
+    is_truncated = True
+    all_files = set()
+    while is_truncated:
+        response = s3_client.list_objects_v2(**kwargs)
+        if response['IsTruncated']:
+            kwargs['ContinuationToken'] = response['NextContinuationToken']
+        else:
+            is_truncated = False
+        if 'Contents' in response.keys():
+            all_files = all_files.union({obj['Key'] for obj in response['Contents']})
+    return all_files
+
+def s3_format_path(key, bucket=source_bucket):
+    '''Formats a given key and a bucket name to conform
+    to s3:// URI format
+    '''
+    return  's3://' + bucket + '/' + key
+
+def get_lookup_file(files):
+    '''Returns the most recent lookup file that exists in the
+    input argument.
+    '''
+    lfiles = filter(lambda x: x.endswith('lookup_data.tar.gz'), all_files)
+    return s3_format_path(max(lfiles))
+
+logger.info('Getting the list of files available in the source S3 bucket.')
+
+all_files = get_all_files(s3_client=s3_client, bucket=source_bucket, prefix='incoming/')
+
+lookup_file = get_lookup_file(all_files)
+
+lookup_tables_rdd = (spark.sparkContext.binaryFiles(lookup_file)
+    .flatMapValues(extract_files)
+    .map(lambda row: (row[1][0], row[1][1].decode('utf-8', 'ignore'))))
+
+lookup_tables_rdd = lookup_tables_rdd.repartition(100)
+lookup_tables_df = dict()
+for lookup in lookup_tables:
+    logger.info('Reading and caching lookup file ' + lookup[0] + '.tsv')
+    lookup_rdd = (lookup_tables_rdd
+                .filter(lambda x: x[0] == lookup[0] + '.tsv')
+                .flatMap(lambda x: (x[1].split('\n')))
+                .map(row_parser)
+                .filter(lambda x: x[0] != None))
+    df_lookup = spark.createDataFrame(lookup_rdd, schema=lookup_schema)
+    lookup_tables_df[lookup] = df_lookup.repartition(100)
+    lookup_tables_df[lookup].cache()
+
+logger.info('Finished reading lookup files.')
+
+def batch_data_files_by_date(files):
+    '''Returns a dictionary with days as key and
+    list of files belonging to that day as value.
+    '''
+    file_batch = dict()
+    for key in data_files:
+        date = key.split('-')[-2].split('_')[1]
+        file_batch[date] = file_batch.get(date, list()) + [key]
+    return file_batch
+
+data_files = filter(lambda x: x.endswith('.tsv.gz'), all_files)
+
+logger.info('Batching the data files into dates.')
+file_batch = batch_data_files_by_date(data_files)
+
+for date in sorted(file_batch.keys())[:-1]:
+    files_to_process = map(s3_format_path, file_batch[date])
+    logger.info('Processing the following files for date ' + date + '.\n\t' + '\n\t'.join(sorted(files_to_process)))
+    df0 = spark \
+        .read.format("com.databricks.spark.csv") \
+        .option("quote", "\"") \
+        .option("delimiter", u'\u0009') \
+        .option("charset", 'utf-8') \
+        .schema(schema) \
+        .load(files_to_process) \
+        .dropna(how = 'all')
+    df1 = df0.withColumn('date', df0.date_time.cast('date'))
+    df2 = df1
+    for i, lookup in enumerate(lookup_tables):
+        lookup_table_df = lookup_tables_df[lookup]
+        if not i % 4:
+            df2 =  df2.repartition(100)
+        df2 = (df2
+            .join(broadcast(lookup_table_df), col(lookup[1]) == lookup_table_df.id, 'left')
+            .drop('id')
+            .withColumnRenamed(lookup[1], lookup[1] + '_id')
+            .withColumnRenamed('name', lookup[1]))
+    ds2 = df2.repartition(4).write.format("parquet").partitionBy("date").mode("append").save(args['s3target'])
+    move_files_to_processed(file_batch[date])
+
+logger.info('Removing the non-data files such as manifest and lookup tables.')
+not_data_files = filter(lambda x: not x.endswith('.tsv.gz'), all_files)
+removables = sorted(not_data_files)[:-1]
+move_files_to_processed(removables)
+
+logger.info('Finished processing the data. Commiting the job.')
 
 job.commit()
-

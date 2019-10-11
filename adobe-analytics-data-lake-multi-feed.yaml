@@ -1,0 +1,33 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Adobe Analytics Data Lake Feed
+
+Parameters: 
+
+  AdobeAnalyticsDataFeedS3BucketName:
+    Type: String
+
+Resources:
+
+  # Data Feed drop from Adobe - data (.tsv.gz), manifests (.txt) and lookup info (.tar.gz)
+  # Encrypt, glacier after a month (files should have been processed by then)
+  AdobeAnalyticsDataFeedS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption: 
+        ServerSideEncryptionConfiguration: 
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      BucketName: !Ref AdobeAnalyticsDataFeedS3BucketName
+      LifecycleConfiguration:
+        Rules:
+        - Id: Glacier
+          Status: Enabled
+          Transitions:
+            - TransitionInDays: 30
+              StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
